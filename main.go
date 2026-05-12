@@ -52,11 +52,16 @@ func main() {
 
 	router := tunnel.NewRouter()
 	tunnel.RegisterDemoHandlers(router, zenohEvents)
-	handlers.RegisterAll(router, *robotID, zenohEvents)
+	RegisterAllRoutes(router, *robotID, zenohEvents)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	client := tunnel.NewClient(proxyWSURL, *robotID, router, logger)
 	client.Run(ctx)
+}
+
+// RegisterAllRoutes registers all real handlers on the router.
+func RegisterAllRoutes(router *tunnel.Router, robotID string, middlewares ...tunnel.Middleware) {
+	router.Register("GET", "/id", handlers.RobotID(robotID), middlewares...)
 }
