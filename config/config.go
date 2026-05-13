@@ -9,11 +9,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	DefaultProxyWSURL     = "ws://localhost:8080/api/core/ws/robot"
+	DefaultFacilitatorURL = "https://x402.org/facilitator"
+)
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
 type Config struct {
 	RobotID         string `json:"robot_id"`
 	EVMPayeeAddress string `json:"evm_payee_address"`
 	Price           string `json:"price"`
 	Network         string `json:"network"`
+	ProxyWSURL      string `json:"-"`
+	FacilitatorURL  string `json:"-"`
 }
 
 var (
@@ -31,6 +45,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err := json.Unmarshal(file, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+
+	cfg.ProxyWSURL = getEnvOrDefault("PROXY_WS_URL", DefaultProxyWSURL)
+	cfg.FacilitatorURL = getEnvOrDefault("FACILITATOR_URL", DefaultFacilitatorURL)
 
 	if cfg.RobotID == "" {
 		cfg.RobotID = uuid.NewString()

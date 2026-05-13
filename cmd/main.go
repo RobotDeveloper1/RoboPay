@@ -25,8 +25,6 @@ import (
 )
 
 const (
-	ProxyWSURL             = "ws://localhost:8080/api/core/ws/robot"
-	FacilitatorURL         = "https://x402.org/facilitator"
 	RobotConfigTopicPrefix = "robot/config/"
 )
 
@@ -115,7 +113,7 @@ func main() {
 
 	for {
 		router := setupRouter(cfg, logger)
-		client := internal.NewClient(ProxyWSURL, cfg.RobotID, router, logger)
+		client := internal.NewClient(cfg.ProxyWSURL, cfg.RobotID, router, logger)
 
 		clientCtx, clientCancel := context.WithCancel(ctx)
 
@@ -161,7 +159,7 @@ func setupRouter(cfg *config.Config, logger *zap.Logger) *gin.Engine {
 	}))
 
 	facilitatorClient := x402http.NewHTTPFacilitatorClient(&x402http.FacilitatorConfig{
-		URL: FacilitatorURL,
+		URL: cfg.FacilitatorURL,
 	})
 
 	routes := x402http.RoutesConfig{
