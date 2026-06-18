@@ -55,6 +55,14 @@ func getZenohPublisher() (zenohPublisher, error) {
 	return zenohPub, nil
 }
 
+func PublishRobotAction(payload []byte) error {
+	pub, err := getZenohPublisher()
+	if err != nil {
+		return err
+	}
+	return pub.Publish(RobotActionTopic, payload)
+}
+
 type Handlers struct {
 	Logger *zap.Logger
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	aipserver "github.com/unibaseio/aip-go-sdk/server"
 	x402 "github.com/x402-foundation/x402/go"
 	x402http "github.com/x402-foundation/x402/go/http"
 	ginmw "github.com/x402-foundation/x402/go/http/gin"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/fabricfoundation/robot-tunnel-client/config"
 	"github.com/fabricfoundation/robot-tunnel-client/internal"
+	"github.com/fabricfoundation/robot-tunnel-client/internal/aipagent"
 	"github.com/fabricfoundation/robot-tunnel-client/internal/handlers"
 )
 
@@ -111,8 +113,17 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	aipSrv := aipagent.Build(cfg, handlers.PublishRobotAction, logger)
+	if aipSrv != nil {
+		go func() {
+			if err := aipSrv.Run(ctx); err != nil {
+				logger.Warn("AIP agent server stopped", zap.Error(err))
+			}
+		}()
+	}
+
 	for {
-		router := setupRouter(cfg, logger)
+		router := setupRouter(cfg, aipSrv, logger)
 		client := internal.NewClient(cfg.ProxyWSURL, cfg.RobotID, router, logger)
 
 		clientCtx, clientCancel := context.WithCancel(ctx)
@@ -136,7 +147,7 @@ func main() {
 	}
 }
 
-func setupRouter(cfg *config.Config, logger *zap.Logger) *gin.Engine {
+func setupRouter(cfg *config.Config, aipSrv *aipserver.Server, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	router.Use(cors.New(cors.Config{
@@ -188,6 +199,12 @@ func setupRouter(cfg *config.Config, logger *zap.Logger) *gin.Engine {
 
 	h := handlers.NewHandlers(logger)
 	RegisterAllRoutes(router, h)
+
+	// Serve the AIP A2A contract (/.well-known/agent-card.json, /invoke, ...)
+	// for any path Gin doesn't own. The gateway proxies these to us verbatim.
+	if aipSrv != nil {
+		router.NoRoute(gin.WrapH(aipSrv.Handler()))
+	}
 
 	return router
 }
