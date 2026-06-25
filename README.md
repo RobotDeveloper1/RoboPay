@@ -16,6 +16,18 @@ This service keeps an outbound WebSocket tunnel to a proxy and handles request e
 - Publishes accepted action events to a Zenoh topic (`robot/tunnel/action`)
 - Hot-reloads config (payee address, price, network) via Zenoh subscriber
 
+## Integrations
+
+The AEON BNB x402 bridge-stage validation project lives under:
+
+```text
+integrations/aeon-robot-communication/
+```
+
+It is kept as a nested integration project so the Go tunnel client structure stays intact while preserving the AEON gateway's TypeScript source, tests, scripts, and validation docs in one readable place.
+
+That integration proves the upstream AEON payment/action gateway flow through mock AEON x402 authorization, receipt/action-envelope generation, real Zenoh publication, OM1 bridge forwarding, and ROS2 `/cmd_vel` output. The Go tunnel client remains the robot-side tunnel and Zenoh dispatch service.
+
 ## Envelope
 
 ```go
