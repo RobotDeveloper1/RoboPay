@@ -48,6 +48,15 @@ type Config struct {
 	AIPLocalPort     int    `json:"-"` // localhost port the SDK binds for its (tunnel-bypassed) listener
 }
 
+// PriceAmount returns the numeric value of the configured price ("$0.002" → 0.002).
+func (c *Config) PriceAmount() float64 {
+	v, err := strconv.ParseFloat(strings.TrimPrefix(c.Price, "$"), 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
 // AIPEndpointURL is the public URL AIP advertises and calls for this robot:
 // the gateway's transparent proxy path. AIP traffic flows
 // AIP -> gateway(/robots/<id>/...) -> ws -> tunnel -> AIP handler.
