@@ -13,6 +13,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	aipauth "github.com/unibaseio/aip-go-sdk/auth"
 	aipserver "github.com/unibaseio/aip-go-sdk/server"
 	x402 "github.com/x402-foundation/x402/go"
 	x402http "github.com/x402-foundation/x402/go/http"
@@ -48,6 +49,20 @@ func main() {
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		logger.Fatal("configuration error", zap.Error(err))
+	}
+
+	// No token in the env? Fall back to the SDK's cached credentials, or walk
+	// the user through the browser authorization flow on first run.
+	if cfg.AIPEnabled && cfg.AIPPrivyToken == "" {
+		token, wallet, err := aipauth.EnsureAuth(context.Background())
+		if err != nil {
+			logger.Fatal("unibase authorization failed", zap.Error(err))
+		}
+		cfg.AIPPrivyToken = token
+		if cfg.AIPUserID == "" {
+			cfg.AIPUserID = wallet
+		}
+		logger.Info("unibase authorization ready", zap.String("wallet", wallet))
 	}
 
 	session, err := zenoh.Open(zenoh.NewConfigDefault(), nil)
