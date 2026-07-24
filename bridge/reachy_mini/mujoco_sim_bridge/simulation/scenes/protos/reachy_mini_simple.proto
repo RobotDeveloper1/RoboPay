@@ -2520,7 +2520,7 @@ PROTO reachy_mini_simple [
                                                       name "passive_7_z_sensor"
                                                     }
                                                   ]
-                                                  endPoint Solid {
+                                                  endPoint DEF HEAD Solid {
                                                     children [
                                                       Pose {
                                                         translation -0.038719 -0.032945 -0.024043

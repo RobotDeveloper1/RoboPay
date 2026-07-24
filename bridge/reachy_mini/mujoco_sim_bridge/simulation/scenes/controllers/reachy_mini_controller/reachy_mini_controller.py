@@ -86,35 +86,60 @@ def compute_angular_error(head_pos, head_fwd, target_pos):
     return math.acos(cos_angle)
 
 
-def get_head_state(supervisor, yaw, stewart_qpos):
-    """Compute head position and forward vector from joint states.
+def calibrate_gaze(head_node):
+    """Capture the head-fixed gaze axis at the neutral pose.
 
-    The head is at the top of the Stewart platform. Its orientation is
-    determined by yaw_body rotation + Stewart platform tilt.
+    At the neutral configuration the robot faces +X (the table where the
+    targets sit). We express that world gaze direction in the head's own body
+    frame so it can be rotated by the head's REAL orientation every step. This
+    makes the tracking metric follow the genuine simulated head pose without
+    depending on the URDF link's arbitrary local-axis convention.
+
+    Returns None if the head node is unavailable (falls back to estimation).
     """
-    # Head position: base + torso height + neck + head offset
-    # Approximate: head is at ~0.37m height, rotated by yaw
-    head_height = 0.37
-    head_pos = [0.0, 0.0, head_height]
+    if head_node is None:
+        return None
+    R = head_node.getOrientation()  # row-major world rotation matrix at neutral
+    # gaze_local = R^T @ [1, 0, 0] = first row of R  -> world +X in the head frame.
+    return [R[0], R[1], R[2]]
 
-    # Forward vector: primarily determined by yaw, with Stewart tilt contribution
-    # Stewart joints 1,3,5 (X-axis) contribute pitch; 2,4,6 (Y-axis) contribute roll
+
+def get_head_state(head_node, gaze_local, yaw, stewart_qpos):
+    """Return (head_pos, head_fwd) from the REAL simulated head node pose.
+
+    Reads the head Solid's actual world position and orientation directly from
+    the Webots supervisor -- the genuine physics state after the Stewart
+    platform resolves -- instead of estimating it from joint angles. The
+    forward vector is the calibrated body-fixed gaze axis rotated into the
+    world by the head's real orientation. Falls back to a kinematic estimate
+    only when the head node is unavailable.
+    """
+    if head_node is not None and gaze_local is not None:
+        head_pos = list(head_node.getPosition())
+        R = head_node.getOrientation()
+        head_fwd = [
+            R[0] * gaze_local[0] + R[1] * gaze_local[1] + R[2] * gaze_local[2],
+            R[3] * gaze_local[0] + R[4] * gaze_local[1] + R[5] * gaze_local[2],
+            R[6] * gaze_local[0] + R[7] * gaze_local[1] + R[8] * gaze_local[2],
+        ]
+        norm = math.sqrt(head_fwd[0] ** 2 + head_fwd[1] ** 2 + head_fwd[2] ** 2)
+        if norm > 1e-9:
+            head_fwd = [head_fwd[0] / norm, head_fwd[1] / norm, head_fwd[2] / norm]
+        return head_pos, head_fwd
+    return _estimate_head_state(yaw, stewart_qpos)
+
+
+def _estimate_head_state(yaw, stewart_qpos):
+    """Kinematic fallback used only if the real head node cannot be read."""
+    head_pos = [0.0, 0.0, 0.37]
     pitch = (stewart_qpos[0] + stewart_qpos[2] + stewart_qpos[4]) / 3.0 * 0.3
-    roll = (stewart_qpos[1] + stewart_qpos[3] + stewart_qpos[5]) / 3.0 * 0.3
-
-    # Forward vector with yaw + pitch
     cos_y, sin_y = math.cos(yaw), math.sin(yaw)
     cos_p = math.cos(pitch)
-    head_fwd = [
-        cos_y * cos_p,
-        sin_y * cos_p,
-        math.sin(pitch),
-    ]
-
+    head_fwd = [cos_y * cos_p, sin_y * cos_p, math.sin(pitch)]
     return head_pos, head_fwd
 
 
-def run_episode(supervisor, motors, sensors, policy, target_name, node_name, timestep):
+def run_episode(supervisor, head_node, gaze_local, motors, sensors, policy, target_name, node_name, timestep):
     """Run one tracking episode for a single target in real Webots physics."""
     policy.reset()
 
@@ -133,8 +158,8 @@ def run_episode(supervisor, motors, sensors, policy, target_name, node_name, tim
         stewart_qpos = joint_values[1:7]
         antenna_qpos = joint_values[7:9]
 
-        # Compute head state from real joint readings
-        head_pos, head_fwd = get_head_state(supervisor, yaw, stewart_qpos)
+        # Read the REAL head pose from the Webots supervisor node
+        head_pos, head_fwd = get_head_state(head_node, gaze_local, yaw, stewart_qpos)
 
         # Compute real angular error
         error = compute_angular_error(head_pos, head_fwd, target_pos)
@@ -245,6 +270,18 @@ def main():
     print(f"[Webots Controller] Motors found: {len(valid_motors)}/9")
     print(f"[Webots Controller] Sensors found: {len(valid_sensors)}/9")
 
+    # Resolve the real head node (Stewart top plate) so the tracking error is
+    # measured from the genuine simulated head pose, not a kinematic estimate.
+    robot_node = supervisor.getSelf()
+    head_node = robot_node.getFromProtoDef("HEAD") if robot_node is not None else None
+    if head_node is None:
+        print("[Webots Controller] WARNING: HEAD node not found -- using kinematic fallback")
+    # Step once so node poses are valid, then calibrate the gaze axis at neutral.
+    supervisor.step(timestep)
+    gaze_local = calibrate_gaze(head_node)
+    print(f"[Webots Controller] Head pose source: "
+          f"{'REAL supervisor node' if gaze_local else 'kinematic estimate'}")
+
     # Instantiate the SAME policy class used by MuJoCo
     policy = ReachyTaskPolicy()
 
@@ -266,7 +303,8 @@ def main():
             s.enable(timestep)
 
         episode_result = run_episode(
-            supervisor, valid_motors, valid_sensors, policy, target, node_name, timestep
+            supervisor, head_node, gaze_local, valid_motors, valid_sensors,
+            policy, target, node_name, timestep
         )
         results.append(episode_result)
         print(f"  -> completed={episode_result['task_completed']}, "
@@ -282,6 +320,7 @@ def main():
         "simulator_engine": "Webots",
         "webots_version": "unknown",
         "dof_actuated": len(valid_motors),
+        "head_pose_source": "supervisor_node" if gaze_local else "kinematic_estimate",
         "targets_tracked": [r["target_object"] for r in results if r.get("task_completed")],
         "targets_requested": TARGETS,
         "task_completed": all(r.get("task_completed", False) for r in results) if results else False,
@@ -296,7 +335,9 @@ def main():
         "joint_names": JOINT_NAMES,
         "note": (
             f"Real Webots physics with {len(valid_motors)} actuated joints. "
-            f"Same ReachyTaskPolicy as MuJoCo bridge. Full closed-loop feedback."
+            f"Same ReachyTaskPolicy as MuJoCo bridge. Full closed-loop feedback. "
+            f"Tracking error measured from the real supervisor head-node pose "
+            f"(getPosition/getOrientation), not a kinematic estimate."
         ),
     }
 
